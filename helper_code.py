@@ -12,7 +12,7 @@ import wfdb
 
 ### Challenge variables
 patient_id_string = '# Patient ID:'
-encounter_id_string = '# Encounter ID:'
+exam_id_string = '# Exam ID:'
 age_string = '# Age:'
 sex_string = '# Sex:'
 label_string = '# Chagas label:'
@@ -123,12 +123,12 @@ def get_patient_id(string):
         patient_id = float('nan')
     return patient_id
 
-# Get the encounter ID from a header or a similar string.
-def get_patient_id(string):
-    encounter_id, has_encounter_id = get_variable(string, encounter_id_string)
-    if not has_encounter_id:
-        encounter_id = float('nan')
-    return encounter_id
+# Get the exam ID from a header or a similar string.
+def get_exam_id(string):
+    exam_id, has_exam_id = get_variable(string, exam_id_string)
+    if not has_exam_id:
+        exam_id = float("nan")
+    return exam_id
 
 # Get the age from a header or a similar string.
 def get_age(string):
