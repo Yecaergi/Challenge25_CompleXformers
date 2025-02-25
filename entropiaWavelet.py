@@ -1,9 +1,10 @@
-# -*- coding: utf-8 -*-
 """
 Created on Thu Feb 20 15:41:40 2025
 
 @author: GVC
 """
+
+
 import numpy as np
 import pywt  
 from JSDiv import JSDiv
@@ -11,8 +12,10 @@ import matplotlib.pyplot as plt
 from scipy.signal import resample
 import neurokit2 as nk
 import wfdb
+import scipy.signal as sig
 import os
-
+from scipy.signal import butter, freqz, filtfilt
+from helper_code import *
 
 # Funciones para el filtro de Lyons
 def promediador_rt_init(xx, DD, UU):
@@ -72,8 +75,8 @@ def filtro_peine_DCyArmonicas(xx, DD=16, UU=2, MA_stages=2):
     
     return yy
 
-def obtener_picos(ecg_normalized):
-    _, rpeaks = nk.ecg_peaks(ecg_normalized, sampling_rate=fs)
+def obtener_picos(ecg_normalized, sampling_new):
+    _, rpeaks = nk.ecg_peaks(ecg_normalized, sampling_rate=sampling_new)
     
     return rpeaks['ECG_R_Peaks']
 
@@ -85,7 +88,7 @@ def filtrar_qrs(ventanas, median_window, threshold=0.98):
         if np.correlate(window.flatten(), median_window, mode='valid') / (np.linalg.norm(window) * np.linalg.norm(median_window)) > threshold
     ]
 
-#Truco para incorporar las Db6 en pywt
+# Truco para incorporar las Db6 en pywt
 ex = pywt.DiscreteContinuousWavelet('db6')
 class DiscreteContinuousWaveletEx(type(ex)):
    def __init__(self, name=u'', filter_bank=None):
@@ -93,11 +96,8 @@ class DiscreteContinuousWaveletEx(type(ex)):
        pywt.DiscreteContinuousWavelet.__init__(self, name, filter_bank)
        self.complex_cwt = False
 
-
-fs=400         
-nyq_frec = fs/2
-dd=30   
-uu = 10  
+dd=30         # dejarlo así
+uu = 10       # dejarlo así porque resamplee a 1000Hz
 ma_st = 2 
 demora_rl = int((dd-1)/2*ma_st*uu)
 k1 = 48
@@ -105,14 +105,16 @@ k2 = 77
 units = 'mV'  
 sampling_new = 1000  
 
+class SignalProcessingException(Exception):
+    """Exception raised when there are issues in signal processing."""
+    pass
 
-def entropiaWavelet(signal_data, **kwargs): 
-  
+
+def entropiaWavelet(signal_data, sampling, **kwargs):
     wName = kwargs.get('wName', 'gaus6')
     wMaxScale = kwargs.get('wMaxScale', 16)
     wTscale = kwargs.get('wTscale', 'continua')
 
-    
     if 'wName' in kwargs:
         wName = kwargs['wName']
     if 'wMaxScale' in kwargs:
@@ -120,52 +122,73 @@ def entropiaWavelet(signal_data, **kwargs):
     if 'wTscale' in kwargs:
         wTscale = kwargs['wTscale']
 
-    
     if wTscale == 'discreta':
         wScales = 2 ** np.arange(wMaxScale)       
     else:
         wScales = np.arange(1, wMaxScale + 1)     
-    
+
     wNscales = len(wScales)
     
-    H = {
-    'pd': np.nan,    
-    'mWd': np.nan,
-    'mDd': np.nan,
-    'mHd': np.nan,
-    'sHd': np.nan,
-    'mCd': np.nan,
-    'sCd': np.nan,
-    'mEt': np.nan,
-    'filas': np.nan,
-    'wName': np.nan,
-    'wScales': np.nan,
-    'wNscales': np.nan,
-    'wMaxScale': np.nan,
-    'wTscale': np.nan,
-}
-    
-    # Calcular la nueva longitud de la señal
-    new_length = int(len(signal_data) * (sampling_new / fs))
+    # Verifica si la señal está vacía o tiene NaN
+    if signal_data is None or len(signal_data) == 0 or np.isnan(signal_data).any():
+        raise SignalProcessingException("La señal está vacía o contiene valores NaN.")
 
-    # Realizar el re-muestreo para aplicar mismo método que en PTB (16 escalas)
-    ecg = resample(signal_data, new_length)
+    H = {
+        'pd': np.nan,    
+        'mWd': np.nan,
+        'mDd': np.nan,
+        'mHd': np.nan,
+        'sHd': np.nan,
+        'mCd': np.nan,
+        'sCd': np.nan,
+        'mEt': np.nan,
+        'filas': np.nan,
+        'wName': np.nan,
+        'wScales': np.nan,
+        'wNscales': np.nan,
+        'wMaxScale': np.nan,
+        'wTscale': np.nan,
+    }
+
+    # Calcular la nueva longitud de la señal
+    new_length = int(len(signal_data) * (sampling_new / sampling))
+
+    # Realizar el re-muestreo para aplicar el mismo método que en PTB (16 escalas)
+    try:
+        ecg = resample(signal_data, new_length)
+    except Exception as e:
+        raise SignalProcessingException(f"Error al realizar el re-muestreo de la señal: {e}")
 
     # Filtrado de Lyons
-    ecg_filtered = filtro_peine_DCyArmonicas(ecg, DD=dd, UU=uu, MA_stages=ma_st)
-    
+    try:
+        ecg_filtered = filtro_peine_DCyArmonicas(ecg, DD=dd, UU=uu, MA_stages=ma_st)
+    except Exception as e:
+        # Si falla el filtro especializado, intentamos el filtro de mediana
+        try:
+            estblwander = sig.medfilt(ecg, 201)
+            estblwander2 = sig.medfilt(estblwander, 601)
+            ecg_filtered = ecg - estblwander2  # La señal filtrada con el filtro de mediana
+        except Exception as e2:
+            raise SignalProcessingException(f"Ambos filtros fallaron: {e2}")
+
     # Normalización y limpieza de la señal
-    ecg_cleaned = nk.ecg_clean(ecg_filtered.flatten(), sampling_rate=fs)
-    
+    try:
+        ecg_cleaned = nk.ecg_clean(ecg_filtered.flatten(), sampling_rate=sampling_new)
+    except Exception as e:
+        raise SignalProcessingException(f"Error al limpiar la señal ECG: {e}")
+
     # Detección de picos R
-    peak_indices = obtener_picos(ecg_cleaned)
-    
+    try:
+        peak_indices = obtener_picos(ecg_cleaned, sampling_new)
+    except Exception as e:
+        raise SignalProcessingException(f"Error al detectar los picos R: {e}")
+
     # Seleccionar solo los picos entre el segundo y el anteúltimo
     if len(peak_indices) > 2:  
         selected_peaks = peak_indices[1:-1]
     else:
-        print(f'La derivación tiene menos de 3 picos R detectados. No se procesará.') 
-        
+        raise SignalProcessingException(f'La derivación tiene menos de 3 picos R detectados. No se procesará.')
+
     # Crear ventanas alrededor de los picos seleccionados
     selected_windows = [
         np.pad(
@@ -183,86 +206,91 @@ def entropiaWavelet(signal_data, **kwargs):
     ar = filtrar_qrs(selected_windows, median_window)
     ar = np.array(ar)
     
-    hayNaN = np.nanmean(ar, axis=0)
-    ar = ar[:, ~np.isnan(hayNaN)]
-     
+    # Eliminar las columnas que contengan NaN antes de continuar
+    ar = ar[:, ~np.isnan(ar).any(axis=0)]
     
-    #----------------------------------------------------------------------
-    #  quito la linea de base a cada onda
-    # ----------------------------------------------------------------------
-    columnas, filas = ar.shape                
-   
-    ar = ar - np.ones((columnas, 1)) *np.mean(ar, axis=0)  # elimino la media de cada onda
-  
-    #--------------------------------------------------------------
-    # obtengo la escala wavelet de las derivaciones ortogonales
-    #--------------------------------------------------------------
-  
+    # Asegurarse de que las ventanas no sean vacías
+    if ar.shape[0] == 0:
+        raise SignalProcessingException("No se encontraron ventanas válidas después del filtrado. No se procesará.")
+    
+    # Quitar la línea base a cada onda
+    columnas, filas = ar.shape
+    ar = ar - np.ones((columnas, 1)) * np.mean(ar, axis=0)  # Elimino la media de cada onda
+
+    # Analizo el ruido
+    VENTANA_RUIDO = 20  # lo dejo constante a 20 μV porque resampleo a 1000 Hz
+    # Calcula el ruido RMS
+    rmsnoise = np.sqrt(np.mean(np.std(ar[:VENTANA_RUIDO, :], axis=0, ddof=0)**2))
+    
+    # Filtrar las señales cuyo ruido RMS es mayor a 20 μV
+    indices_a_descartar = np.nonzero(rmsnoise > 20e-6)[0]  # 20 μV = 20e-6 V
+    ar_filtrado = np.delete(ar, indices_a_descartar, axis=0)
+    
+    # Asegurarse de que hay datos después del filtrado
+    if ar_filtrado.shape[0] == 0:
+        raise SignalProcessingException("No se encontraron señales válidas después del filtrado por ruido. No se procesará.")
+
+    # Obtengo la escala wavelet de las derivaciones ortogonales
+    columnas, filas = ar_filtrado.shape
     swd = np.zeros((wNscales, columnas, filas))
     wName = DiscreteContinuousWaveletEx('db6')
 
     if wTscale == 'discreta':
-         sqrt22 = np.sqrt(2) / 2
-         for j in range(filas):
-             _, sd = pywt.swt(ar[:, j], wName, level=wNscales)
-             gain = sqrt22 / np.sqrt(wScales[:, None])
-             swd[:, :, j] = gain * np.array(sd)
+        sqrt22 = np.sqrt(2) / 2
+        for j in range(filas):
+            _, sd = pywt.swt(ar_filtrado[:, j], wName, level=wNscales)
+            gain = sqrt22 / np.sqrt(wScales[:, None])
+            swd[:, :, j] = gain * np.array(sd)
     else:
-         gain = 1. / np.sqrt(wScales[:, np.newaxis])
-         # Calcular la CWT para cada fila
-         for j in range(filas):
-             coef, _ = pywt.cwt(ar[:, j], wScales, wName)
-             swd[:, :, j] = gain * coef       
-          
-    
-    H['wNscales'] = wNscales;
-    H['wMaxScale'] = wMaxScale;
-    H['wScales'] = wScales;
-    H['wName'] = wName;
-    H['wTscale'] = wTscale;        
-   
-     
-    columnas, filas=ar.shape
-   
-    #----------------------------------------------------------------------
-    #  Analizo la entropia completa de cada onda
-    #----------------------------------------------------------------------
-    
-    # energia escalas x latidos
-    Ed = np.squeeze(np.sum(np.abs(swd) ** 2, axis=1))
+        gain = 1. / np.sqrt(wScales[:, np.newaxis])
+        # Calcular la CWT para cada fila
+        for j in range(filas):
+            coef, _ = pywt.cwt(ar_filtrado[:, j], wScales, wName)
+            swd[:, :, j] = gain * coef
 
-    #  energia total x filas
+    H['wNscales'] = wNscales
+    H['wMaxScale'] = wMaxScale
+    H['wScales'] = wScales
+    H['wName'] = wName
+    H['wTscale'] = wTscale
+
+    # Analizo la entropía completa de cada onda
+    Ed = np.squeeze(np.sum(np.abs(swd) ** 2, axis=1))
     Et = np.sum(Ed, axis=0)
     
-    #  distribucion de probabilidad escalas x latidos
-    pd = Ed / (np.ones((wNscales,1)) * Et)
+    if np.all(Et == 0):
+       raise SignalProcessingException("Entropía total (Et) es 0, se saltará esta señal.")
+
+    
+    pd = Ed / (np.ones((wNscales, 1)) * Et)
   
-    # entropia total x latidos
+    # Entropía total por latidos
     Wd = - np.sum(pd * np.log(pd + np.finfo(float).eps), axis=0)
-    # desorden x latidos (entropia normalizada)
     Hd = Wd / np.log(wNscales + np.finfo(float).eps)
 
-    # constante de normalización
+    # Constante de normalización
     Q0 = -2 / (((wNscales + 1) / wNscales) * np.log(wNscales + 1) - 2 * np.log(2 * wNscales) + np.log(wNscales))
  
-    # desequilibrio de Jensen-Shannon x latidos
+    # Desequilibrio de Jensen-Shannon por latidos
     Dd = Q0 * JSDiv(pd, 1 / wNscales)  
-    
     Cd = Hd * Dd
    
     H['pd'] = np.mean(pd, axis=1, keepdims=True)
-    H['mEt'] = np.mean(Et)     # energia media de los latidos
-    H['mWd'] = np.mean(Wd)     # entropia media de los latidos
-    H['mHd'] = np.mean(Hd)     # desorden medio (entropia normalizada) de los latidos
-    H['sHd'] = np.std(Hd)      # desorden SD (entropia normalizada) de los latidos
-    H['mDd'] = np.mean(Dd)     # desequilibrio medio de los latidos
-    H['mCd'] = np.mean(Cd)     # complejidad media de los latidos
-    H['sCd'] = np.std(Cd)      # complejidad SD de los latidos
+    H['mEt'] = np.mean(Et)     # Energía media de los latidos
+    H['mWd'] = np.mean(Wd)     # Entropía media de los latidos
+    H['mHd'] = np.mean(Hd)     # Desorden medio (entropía normalizada) de los latidos
+    H['sHd'] = np.std(Hd)      # Desorden SD (entropía normalizada) de los latidos
+    H['mDd'] = np.mean(Dd)     # Desequilibrio medio de los latidos
+    H['mCd'] = np.mean(Cd)     # Complejidad media de los latidos
+    H['sCd'] = np.std(Cd)      # Complejidad SD de los latidos
 
-    wdFilas = len(Wd);    
+    wdFilas = len(Wd)    
     H['filas'] = wdFilas
     
     return H
+
+
+
 
 #----------------------------------------------------------------
 # Veamos cómo funciona en algunos pacientes...
@@ -278,7 +306,7 @@ def entropiaWavelet(signal_data, **kwargs):
 #if os.path.exists(archivo_dat) and os.path.exists(archivo_hea):
     
 #    try:
-#        record = wfdb.rdrecord(archivo_base)
+ #       record = wfdb.rdrecord(archivo_base)
 #        metadatos=record.__dict__
         
 #    except Exception as e:
@@ -303,9 +331,18 @@ def entropiaWavelet(signal_data, **kwargs):
 
 #plt.figure()
 #plt.plot(xx)
+#record='C:/Users/eah/Desktop/challenge2025gi/Samitrop/samitrop_output/4991'
+
+#signal, fields = load_signals(record)
+#xx=signal[:,0]
+
+#plt.figure()
+#plt.plot(xx)
+#sampling_signal=fields['fs']
+#resultado = entropiaWavelet(xx,sampling_signal, wName='db6', wMaxScale=16, wTscale='continua')
 
 
-#resultado = entropiaWavelet(xx, wName='db6', wMaxScale=16, wTscale='continua')
+
 
 
 
