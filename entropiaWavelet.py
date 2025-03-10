@@ -1,9 +1,15 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Mar  7 09:08:10 2025
+
+@author: GVC
+"""
+# -*- coding: utf-8 -*-
 """
 Created on Thu Feb 20 15:41:40 2025
 
 @author: GVC
 """
-
 
 import numpy as np
 import pywt  
@@ -16,6 +22,7 @@ import scipy.signal as sig
 import os
 from scipy.signal import butter, freqz, filtfilt
 from helper_code import *
+import concurrent.futures  # Para paralelizar
 
 # Funciones para el filtro de Lyons
 def promediador_rt_init(xx, DD, UU):
@@ -62,14 +69,29 @@ def filtro_peine_DCyArmonicas(xx, DD=16, UU=2, MA_stages=2):
     NN = len(xx)
     xx_ci, yy_ci = promediador_rt_init(xx, DD, UU)
     yy = np.zeros_like(xx)
-    for jj in range(0, NN, NN // 4):
-        yy_aux, xx_ci, yy_ci = promediador_rt(xx[jj:jj + NN // 4], DD, UU, xx_ci, yy_ci, kk_offset=jj)
-        yy[jj:jj + NN // 4] = yy_aux
+    
+    # Paralelización de procesamiento por bloques de datos
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = []
+        for jj in range(0, NN, NN // 4):
+            futures.append(executor.submit(promediador_rt, xx[jj:jj + NN // 4], DD, UU, xx_ci, yy_ci, kk_offset=jj))
+        
+        # Obtener los resultados de las tareas en paralelo
+        for jj, future in enumerate(futures):
+            yy_aux, xx_ci, yy_ci = future.result()
+            yy[jj * (NN // 4): (jj + 1) * (NN // 4)] = yy_aux
+    
     for ii in range(1, MA_stages):
         xx_ci, yy_ci = promediador_rt_init(yy, DD, UU)
-        for jj in range(0, NN, NN // 4):
-            yy_aux, xx_ci, yy_ci = promediador_rt(yy[jj:jj + NN // 4], DD, UU, xx_ci, yy_ci, kk_offset=jj)
-            yy[jj:jj + NN // 4] = yy_aux
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = []
+            for jj in range(0, NN, NN // 4):
+                futures.append(executor.submit(promediador_rt, yy[jj:jj + NN // 4], DD, UU, xx_ci, yy_ci, kk_offset=jj))
+
+            for jj, future in enumerate(futures):
+                yy_aux, xx_ci, yy_ci = future.result()
+                yy[jj * (NN // 4): (jj + 1) * (NN // 4)] = yy_aux
+    
     xx_aux = np.roll(xx, int((DD - 1) / 2 * MA_stages * UU))
     yy = xx_aux - yy
     
@@ -80,9 +102,7 @@ def obtener_picos(ecg_normalized, sampling_new):
     
     return rpeaks['ECG_R_Peaks']
 
-# Filtrar las ventanas con correlación mayor al umbral  98%
 def filtrar_qrs(ventanas, median_window, threshold=0.98):
-    
     return [
         window for window in ventanas
         if np.correlate(window.flatten(), median_window, mode='valid') / (np.linalg.norm(window) * np.linalg.norm(median_window)) > threshold
@@ -104,6 +124,7 @@ k1 = 48
 k2 = 77
 units = 'mV'  
 sampling_new = 1000  
+
 
 class SignalProcessingException(Exception):
     """Exception raised when there are issues in signal processing."""
@@ -212,6 +233,11 @@ def entropiaWavelet(signal_data, sampling, **kwargs):
     # Asegurarse de que las ventanas no sean vacías
     if ar.shape[0] == 0:
         raise SignalProcessingException("No se encontraron ventanas válidas después del filtrado. No se procesará.")
+    
+    plt.figure()
+    for x in ar:
+        plt.plot(x)
+    
     
     # Quitar la línea base a cada onda
     columnas, filas = ar.shape
