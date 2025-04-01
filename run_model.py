@@ -12,7 +12,6 @@
 import argparse
 import os
 import sys
-
 from helper_code import *
 from team_code import load_model, run_model
 
