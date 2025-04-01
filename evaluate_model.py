@@ -1,23 +1,8 @@
-#!/usr/bin/env python
-
-# Do *not* edit this script. Changes will be discarded so that we can process the models consistently.
-
-# This file contains functions for evaluating models for the Challenge. You can run it as follows:
-#
-#   python evaluate_model.py -d data -o outputs -s scores.csv
-#
-# where 'data' is a folder containing files with the reference signals and labels for the data, 'outputs' is a folder containing
-# files with the outputs from your models, and 'scores.csv' (optional) is a collection of scores for the model outputs.
-#
-# Each data or output file must have the format described on the Challenge webpage. The scores for the algorithm outputs are also
-# described on the Challenge webpage.
-
 import argparse
 import numpy as np
 import os
 import os.path
 import sys
-
 from helper_code import *
 
 # Parse arguments.
