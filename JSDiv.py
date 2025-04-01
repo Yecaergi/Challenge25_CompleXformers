@@ -1,7 +1,6 @@
 import numpy as np
 from Shannon import Shannon
 
-
 def JSDiv(P, Q):
     """
     Jensen-Shannon divergence of two probability distributions.
@@ -21,10 +20,5 @@ def JSDiv(P, Q):
     return jsd
 
 
-
-# Ejemplo de uso
-#P = np.array([[0.1, 0.4, 0.5, 0.3, 0.3, 0.4]])
-#Q = 1/3
-#jsd = JSDiv(P, Q)
 
 
