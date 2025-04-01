@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Mar 27 19:10:37 2025
-
-@author: gise
-"""
-
 from sklearn.ensemble import RandomForestClassifier
 import joblib
 import numpy as np
@@ -182,8 +174,6 @@ def run_model(record, model, verbose):
     probability_output = model.predict_proba(features)[0][1]
 
     return binary_output, probability_output
-
-
 
 # Save your trained model.
 def save_model(model_folder, model):
