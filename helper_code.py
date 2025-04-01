@@ -1,9 +1,3 @@
-#!/usr/bin/env python
-
-# Do *not* edit this script.
-# These are helper functions that you can use with your code.
-# Check the example code to see how to use these functions in your code.
-
 import numpy as np
 import os
 import scipy as sp
@@ -16,7 +10,6 @@ sex_string = '# Sex:'
 label_string = '# Chagas label:'
 probability_string = '# Chagas probability:'
 
-### Challenge data I/O functions
 
 # Find the records in a folder and its subfolders.
 def find_records(folder, header_extension='.hea'):
