@@ -115,68 +115,117 @@ def entropiaWavelet(signal_data, sampling):
 
     return {'mHd': np.mean(Hd), 'mCd': np.mean(Cd)}
 
-# Entrenamiento optimizado y sencillo
+def extract_features(record):
+    try:
+        header = load_header(record)
+        age = get_age(header)
+        sex = get_sex(header)
+
+        sex_encoded = [sex == 'Female', sex == 'Male', sex not in ['Female', 'Male']]
+
+        signal, fields = load_signals(record)
+        sampling_signal = fields['fs']
+        
+        mHd_values = []
+        mCd_values = []
+
+        for i in range(signal.shape[1]):
+            try:
+                entropy = entropiaWavelet(signal[:, i], sampling=sampling_signal)
+                if (
+                    entropy
+                    and not np.isnan(entropy['mHd'])
+                    and not np.isnan(entropy['mCd'])
+                ):
+                    mHd_values.append(entropy['mHd'])
+                    mCd_values.append(entropy['mCd'])
+            except:
+                continue
+
+        HML, CML = np.nan, np.nan
+        if mHd_values:
+            mHd_values = np.array(mHd_values, dtype=np.float64)
+            valid_Hd = mHd_values[~np.isnan(mHd_values)]
+            if valid_Hd.size > 0:
+                HML = np.sqrt(np.mean(valid_Hd**2))
+
+        if mCd_values:
+            mCd_values = np.array(mCd_values, dtype=np.float64)
+            valid_Cd = mCd_values[~np.isnan(mCd_values)]
+            if valid_Cd.size > 0:
+                CML = np.sqrt(np.mean(valid_Cd**2))
+
+        return np.array([age, *sex_encoded, HML, CML], dtype=np.float32)
+
+    except:
+        return None
+
 def train_model(data_folder, model_folder, verbose=False):
     records = find_records(data_folder)
-    features, labels = [], []
+    features_dict = {}
+    labels_dict = {}
 
     for record_name in records:
         record = os.path.join(data_folder, record_name)
         feat = extract_features(record)
         label = load_label(record)
-        if feat is not None and not np.isnan(feat).any():
-            features.append(feat)
-            labels.append(label)
+        if feat is None:
+            continue
 
-    if not features:
+        mask = ~np.isnan(feat)
+        if not np.any(mask):  # todas las features son NaN
+            continue
+
+        key = tuple(mask)
+
+        if key not in features_dict:
+            features_dict[key] = []
+            labels_dict[key] = []
+
+        features_dict[key].append(feat[mask])
+        labels_dict[key].append(label)
+
+    if not features_dict:
         raise RuntimeError("No hay suficientes registros válidos.")
 
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(features, labels)
+    model_dict = {}
+    for key in features_dict:
+        X = np.vstack(features_dict[key])
+        y = labels_dict[key]
+        model = RandomForestClassifier(n_estimators=100, random_state=42)
+        model.fit(X, y)
+        model_dict[key] = model
 
     os.makedirs(model_folder, exist_ok=True)
-    joblib.dump({'model': model}, os.path.join(model_folder, 'model.sav'))
+    joblib.dump({'models': model_dict}, os.path.join(model_folder, 'model.sav'))
 
-# Extracción simplificada de características
-def extract_features(record):
-    header = load_header(record)
-    age = get_age(header)
-    sex = get_sex(header)
-    sex_encoded = [sex == 'Female', sex == 'Male', sex not in ['Female', 'Male']]
-
-    signal, fields = load_signals(record)
-    sampling_signal = fields['fs']
-    entropy = entropiaWavelet(signal[:, 0], sampling=sampling_signal)
-    if entropy is None or np.isnan(list(entropy.values())).any():
-        return None
-
-    return np.array([age, *sex_encoded, entropy['mHd'], entropy['mCd']])
-
-
-def load_model(model_folder, verbose):
-    model_filename = os.path.join(model_folder, 'model.sav')
-    model = joblib.load(model_filename)
-    return model
-
-# Run your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
-# arguments of this function.
-def run_model(record, model, verbose):
-    model = model['model']
+def run_model(record, model_bundle, verbose=False):
+    model_dict = model_bundle['models']
     features = extract_features(record)
 
-    if features is None or np.isnan(features).any():
-        if verbose:
-            print(f"[WARNING] Características inválidas para: {record}")
+    if features is None:
         return float('nan'), float('nan')
 
-    features = features.reshape(1, -1)
-    binary_output = model.predict(features)[0]
-    probability_output = model.predict_proba(features)[0][1]
+    mask = ~np.isnan(features)
+    key = tuple(mask)
 
-    return binary_output, probability_output
+    if key not in model_dict:
+        return float('nan'), float('nan')
 
-# Save your trained model.
+    model = model_dict[key]
+    try:
+        features = features[mask].reshape(1, -1)
+        binary_output = model.predict(features)[0]
+        probability_output = model.predict_proba(features)[0][1]
+        return binary_output, probability_output
+
+    except:
+        return float('nan'), float('nan')
+
 def save_model(model_folder, model):
-    d = {'model': model}
     filename = os.path.join(model_folder, 'model.sav')
-    joblib.dump(d, filename, protocol=0)
+    joblib.dump({'models': model}, filename, protocol=0)
+
+def load_model(model_folder, verbose=False):
+    model_filename = os.path.join(model_folder, 'model.sav')
+    return joblib.load(model_filename)
