@@ -1,8 +1,0 @@
-- We successfully evaluated your entry, which received a score of 0.058 on the validation set using the Challenge evaluation metric. 
-
--With my validation set
-score 0.075
-AUROC 0.591
-AUPRC 0.040
-Accuracy 0.970
-F-measure 0.000
